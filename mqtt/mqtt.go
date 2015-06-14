@@ -6,6 +6,7 @@ import (
 	"net"
 	"io"
 	log "github.com/cihub/seelog"
+    "github.com/boltdb/bolt"
 )
 
 /* Glabal status */
@@ -16,6 +17,9 @@ var G_clients_lock *sync.Mutex = new(sync.Mutex)
 var G_subs map[string]map[string]uint8 = make(map[string]map[string]uint8)
 var G_subs_lock *sync.Mutex = new(sync.Mutex)
 var G_redis_client *RedisClient = StartRedisClient()
+
+var bolt_db *DB = new(bolt.DB)
+
 
 // This function should be called upon starting up. It will
 // try to recover global status(G_subs, etc) from Redis.

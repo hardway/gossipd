@@ -1,13 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"flag"
+	"fmt"
+	"github.com/boltdb/bolt"
 	log "github.com/cihub/seelog"
+	"github.com/luanjunyi/gossipd/mqtt"
 	"net"
 	"os"
 	"runtime/debug"
-	"github.com/luanjunyi/gossipd/mqtt"
 )
 
 type CmdFunc func(mqtt *mqtt.Mqtt, conn *net.Conn, client **mqtt.ClientRep)
@@ -16,14 +17,16 @@ var g_debug = flag.Bool("d", false, "enable debugging log")
 var g_port = flag.Int("p", 1883, "port of the broker to listen")
 var g_redis_port = flag.Int("r", 6379, "port of the broker to listen")
 
-var g_cmd_route = map[uint8]CmdFunc {
-	mqtt.CONNECT: mqtt.HandleConnect,
-	mqtt.PUBLISH: mqtt.HandlePublish,
-	mqtt.SUBSCRIBE: mqtt.HandleSubscribe,
+var g_bolt_file = flag.String("b", "bolt.db", "database file")
+
+var g_cmd_route = map[uint8]CmdFunc{
+	mqtt.CONNECT:     mqtt.HandleConnect,
+	mqtt.PUBLISH:     mqtt.HandlePublish,
+	mqtt.SUBSCRIBE:   mqtt.HandleSubscribe,
 	mqtt.UNSUBSCRIBE: mqtt.HandleUnsubscribe,
-	mqtt.PINGREQ: mqtt.HandlePingreq,
-	mqtt.DISCONNECT: mqtt.HandleDisconnect,
-	mqtt.PUBACK: mqtt.HandlePuback,
+	mqtt.PINGREQ:     mqtt.HandlePingreq,
+	mqtt.DISCONNECT:  mqtt.HandleDisconnect,
+	mqtt.PUBACK:      mqtt.HandlePuback,
 }
 
 func handleConnection(conn *net.Conn) {
@@ -46,14 +49,14 @@ func handleConnection(conn *net.Conn) {
 	log.Debug("Got new conection", conn_str)
 	for {
 		// Read fixed header
-        fixed_header, body := mqtt.ReadCompleteCommand(conn)
-		if (fixed_header == nil) {
+		fixed_header, body := mqtt.ReadCompleteCommand(conn)
+		if fixed_header == nil {
 			log.Debug(conn_str, "reading header returned nil, will disconnect")
 			return
 		}
 
 		mqtt_parsed, err := mqtt.DecodeAfterFixedHeader(fixed_header, body)
-		if (err != nil) {
+		if err != nil {
 			log.Debug(conn_str, "read command body failed:", err.Error())
 		}
 
@@ -66,7 +69,7 @@ func handleConnection(conn *net.Conn) {
 		log.Debugf("Got request: %s from %s", mqtt.MessageTypeStr(fixed_header.MessageType), client_id)
 		proc, found := g_cmd_route[fixed_header.MessageType]
 		if !found {
- 			log.Debugf("Handler func not found for message type: %d(%s)",
+			log.Debugf("Handler func not found for message type: %d(%s)",
 				fixed_header.MessageType, mqtt.MessageTypeStr(fixed_header.MessageType))
 			return
 		}
@@ -75,7 +78,7 @@ func handleConnection(conn *net.Conn) {
 }
 
 func setup_logging() {
-    level := "info"
+	level := "info"
 	if *g_debug == true {
 		level = "debug"
 	}

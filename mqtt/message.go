@@ -38,6 +38,10 @@ func (msg *MqttMessage) RedisKey() string {
 	return fmt.Sprintf("gossipd.mqtt-msg.%d", msg.InternalId)
 }
 
+func (msg *MqttMessage) MessageKey() string {
+	return fmt.Sprintf("gossipd.mqtt-msg.%d", msg.InternalId)
+}
+
 func (msg *MqttMessage) Store() {
 	key := msg.RedisKey()
 	G_redis_client.Store(key, msg)
