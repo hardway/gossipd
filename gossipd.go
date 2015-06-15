@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/boltdb/bolt"
 	log "github.com/cihub/seelog"
 	"github.com/luanjunyi/gossipd/mqtt"
 	"net"
@@ -108,9 +107,8 @@ func main() {
 	flag.Parse()
 
 	setup_logging()
-
-	mqtt.RecoverFromRedis()
-
+	mqtt.OpenDatabase(*g_bolt_file)
+	mqtt.RecoverFromBolt()
 	log.Debugf("Gossipd kicking off, listening localhost:%d", *g_port)
 
 	link, _ := net.Listen("tcp", fmt.Sprintf(":%d", *g_port))

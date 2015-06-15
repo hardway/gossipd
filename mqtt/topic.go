@@ -5,7 +5,7 @@ import (
 )
 
 type Topic struct {
-	Content string
+	Content         string
 	RetainedMessage *MqttMessage
 }
 

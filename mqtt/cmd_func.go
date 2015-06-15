@@ -1,12 +1,12 @@
 package mqtt
 
 import (
-	"net"
-	log "github.com/cihub/seelog"
-	"time"
-	"sync"
 	"fmt"
+	log "github.com/cihub/seelog"
+	"net"
 	"runtime/debug"
+	"sync"
+	"time"
 )
 
 const (
@@ -59,14 +59,14 @@ func HandleConnect(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 		// restore subscriptions to client_rep
 		subs := make(map[string]uint8)
 		key := fmt.Sprintf("gossipd.client-subs.%s", client_id)
-		G_redis_client.Fetch(key, &subs)
+		Bolt_db.Fetch(key, &subs)
 		client_rep.Subscriptions = subs
 
 	} else {
 		// Remove subscriptions and flying message
 		RemoveAllSubscriptionsOnConnect(client_id)
 		empty := make(map[uint16]FlyingMessage)
-		G_redis_client.SetFlyingMessagesForClient(client_id, &empty)
+		Bolt_db.SetFlyingMessagesForClient(client_id, &empty)
 	}
 
 	SendConnack(ACCEPTED, conn, client_rep.WriteLock)
@@ -105,7 +105,7 @@ func HandlePublish(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 	mqtt_msg := CreateMqttMessage(topic, payload, client_id, qos, message_id, timestamp, retain)
 	msg_internal_id := mqtt_msg.InternalId
 	log.Debugf("Created new MQTT message, internal id:(%s)", msg_internal_id)
-	
+
 	PublishMessage(mqtt_msg)
 
 	// Send PUBACK if QOS is 1
@@ -162,11 +162,11 @@ func HandleSubscribe(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 		if !client_rep.Mqtt.ConnectFlags.CleanSession {
 			// Store subscriptions to redis
 			key := fmt.Sprintf("gossipd.client-subs.%s", client_id)
-			G_redis_client.Store(key, client_rep.Subscriptions)			
+			Bolt_db.Store(key, client_rep.Subscriptions)
 		}
 
 		log.Debugf("finding retained message for (%s)", topic)
-		retained_msg := G_redis_client.GetRetainMessage(topic)
+		retained_msg := Bolt_db.GetRetainMessage(topic)
 		if retained_msg != nil {
 			go Deliver(client_id, qos, retained_msg)
 			log.Debugf("delivered retained message for (%s)", topic)
@@ -280,7 +280,7 @@ func HandlePuback(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 	message_id := mqtt.MessageId
 	log.Debugf("Handling PUBACK, client:(%s), message_id:(%d)", client_id, message_id)
 
-	messages := G_redis_client.GetFlyingMessagesForClient(client_id)
+	messages := Bolt_db.GetFlyingMessagesForClient(client_id)
 
 	flying_msg, found := (*messages)[message_id]
 
@@ -289,11 +289,10 @@ func HandlePuback(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 			message_id, client_id)
 	} else {
 		delete(*messages, message_id)
-		G_redis_client.SetFlyingMessagesForClient(client_id, messages)
+		Bolt_db.SetFlyingMessagesForClient(client_id, messages)
 		log.Debugf("acked flying message(id=%d), client:(%s)", message_id, client_id)
-	}	
+	}
 }
-
 
 /* Helper functions */
 
@@ -324,10 +323,10 @@ func CheckTimeout(client *ClientRep) {
 
 	for {
 		select {
-		case <- ticker.C:
+		case <-ticker.C:
 			now := time.Now().Unix()
 			lastTimestamp := client.LastTime
-			deadline := int64(float64(lastTimestamp) + float64(interval) * 1.5)
+			deadline := int64(float64(lastTimestamp) + float64(interval)*1.5)
 
 			if deadline < now {
 				ForceDisconnect(client, G_clients_lock, SEND_WILL)
@@ -336,9 +335,9 @@ func CheckTimeout(client *ClientRep) {
 			} else {
 				log.Debugf("client(%s) will be kicked out in %d seconds",
 					client_id,
-					deadline - now)
+					deadline-now)
 			}
-		case <- client.Shuttingdown:
+		case <-client.Shuttingdown:
 			log.Debugf("client(%s) is being shutting down, stopped timeout checker", client_id)
 			return
 		}
@@ -369,7 +368,7 @@ func ForceDisconnect(client *ClientRep, lock *sync.Mutex, send_will uint8) {
 		// remove her subscriptions
 		log.Debugf("Removing subscriptions for (%s)", client_id)
 		G_subs_lock.Lock()
-		for topic, _ := range(client.Subscriptions) {
+		for topic, _ := range client.Subscriptions {
 			delete(G_subs[topic], client_id)
 			if len(G_subs[topic]) == 0 {
 				delete(G_subs, topic)
@@ -382,7 +381,7 @@ func ForceDisconnect(client *ClientRep, lock *sync.Mutex, send_will uint8) {
 
 		// remove her flying messages
 		log.Debugf("Removing all flying messages for (%s)", client_id)
-		G_redis_client.RemoveAllFlyingMessagesForClient(client_id)
+		Bolt_db.RemoveAllFlyingMessagesForClient(client_id)
 		log.Debugf("Removed all flying messages for (%s)", client_id)
 	}
 
@@ -421,7 +420,7 @@ func PublishMessage(mqtt_msg *MqttMessage) {
 	// Update global topic record
 
 	if mqtt_msg.Retain {
-		G_redis_client.SetRetainMessage(topic, mqtt_msg)
+		Bolt_db.SetRetainMessage(topic, mqtt_msg)
 		log.Debugf("Set the message(%s) as the current retain content of topic:%s", payload, topic)
 	}
 
@@ -429,7 +428,7 @@ func PublishMessage(mqtt_msg *MqttMessage) {
 	G_subs_lock.Lock()
 	subs, found := G_subs[topic]
 	if found {
-		for dest_id, dest_qos := range(subs) {
+		for dest_id, dest_qos := range subs {
 			go Deliver(dest_id, dest_qos, mqtt_msg)
 			log.Debugf("Started deliver job for %s", dest_id)
 		}
@@ -440,12 +439,12 @@ func PublishMessage(mqtt_msg *MqttMessage) {
 
 func DeliverOnConnection(client_id string) {
 	log.Debugf("client(%s) just reconnected, delivering on the fly messages", client_id)
-	messages := G_redis_client.GetFlyingMessagesForClient(client_id)
+	messages := Bolt_db.GetFlyingMessagesForClient(client_id)
 	empty := make(map[uint16]FlyingMessage)
-	G_redis_client.SetFlyingMessagesForClient(client_id, &empty)
+	Bolt_db.SetFlyingMessagesForClient(client_id, &empty)
 	log.Debugf("client(%s), all flying messages put in pipeline, removed records in redis", client_id)
 
-	for message_id, msg := range(*messages) {
+	for message_id, msg := range *messages {
 		internal_id := msg.MessageInternalId
 		mqtt_msg := GetMqttMessageById(internal_id)
 		log.Debugf("re-delivering message(id=%d, internal_id=%d) for %s",
@@ -475,7 +474,7 @@ func DeliverMessage(dest_client_id string, qos uint8, msg *MqttMessage) {
 		conn = client_rep.Conn
 		lock = client_rep.WriteLock
 	} else {
-		G_redis_client.AddFlyingMessage(dest_client_id, fly_msg)
+		Bolt_db.AddFlyingMessage(dest_client_id, fly_msg)
 		log.Debugf("client(%s) is offline, added flying message to Redis, message id=%d",
 			dest_client_id, message_id)
 		return
@@ -489,7 +488,7 @@ func DeliverMessage(dest_client_id string, qos uint8, msg *MqttMessage) {
 	}
 	resp.FixedHeader.QosLevel = qos
 	resp.Data = []byte(msg.Payload)
-	
+
 	bytes, _ := Encode(resp)
 
 	lock.Lock()
@@ -502,7 +501,7 @@ func DeliverMessage(dest_client_id string, qos uint8, msg *MqttMessage) {
 
 	if qos == 1 {
 		fly_msg.Status = PENDING_ACK
-		G_redis_client.AddFlyingMessage(dest_client_id, fly_msg)
+		Bolt_db.AddFlyingMessage(dest_client_id, fly_msg)
 		log.Debugf("message(msg_id=%d) sent to client(%s), waiting for ACK, added to redis",
 			message_id, dest_client_id)
 	}
@@ -542,18 +541,18 @@ func RetryDeliver(sleep uint64, dest_client_id string, qos uint8, msg *MqttMessa
 		}
 	}()
 
-	if sleep > 3600 * 4 {
+	if sleep > 3600*4 {
 		log.Debugf("too long retry delay(%s), abort retry deliver", sleep)
 		return
 	}
 
 	time.Sleep(time.Duration(sleep) * time.Second)
 
-	if G_redis_client.IsFlyingMessagePendingAck(dest_client_id, msg.MessageId) {
+	if Bolt_db.IsFlyingMessagePendingAck(dest_client_id, msg.MessageId) {
 		DeliverMessage(dest_client_id, qos, msg)
 		log.Debugf("Retried delivering message %s:%d, will sleep %d seconds before next attampt",
-			dest_client_id, msg.MessageId, sleep * 2)
-		RetryDeliver(sleep * 2, dest_client_id, qos, msg)
+			dest_client_id, msg.MessageId, sleep*2)
+		RetryDeliver(sleep*2, dest_client_id, qos, msg)
 	} else {
 		log.Debugf("message (%s:%d) is not pending ACK, stop retry delivering",
 			dest_client_id, msg.MessageId)
@@ -566,27 +565,26 @@ func RetryDeliver(sleep uint64, dest_client_id string, qos uint8, msg *MqttMessa
 func RemoveAllSubscriptionsOnConnect(client_id string) {
 	subs := new(map[string]uint8)
 	key := fmt.Sprintf("gossipd.client-subs.%s", client_id)
-	G_redis_client.Fetch(key, subs)
+	Bolt_db.Fetch(key, subs)
 
-	G_redis_client.Delete(key)
+	Bolt_db.Delete(key)
 
 	G_subs_lock.Lock()
-	for topic, _ := range(*subs) {
+	for topic, _ := range *subs {
 		delete(G_subs[topic], client_id)
 	}
 	G_subs_lock.Unlock()
-	
+
 }
 
 func showSubscriptions() {
 	// Disable for now
 	return
 	fmt.Printf("Global Subscriptions: %d topics\n", len(G_subs))
-	for topic, subs := range(G_subs) {
+	for topic, subs := range G_subs {
 		fmt.Printf("\t%s: %d subscriptions\n", topic, len(subs))
-		for client_id, qos := range(subs) {
+		for client_id, qos := range subs {
 			fmt.Println("\t\t", client_id, qos)
 		}
 	}
 }
-

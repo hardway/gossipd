@@ -2,24 +2,23 @@ package mqtt
 
 import (
 	"fmt"
-	"sync"
-	"net"
-	"io"
 	log "github.com/cihub/seelog"
-    "github.com/boltdb/bolt"
+	"io"
+	"net"
+	"sync"
 )
 
 /* Glabal status */
 var G_clients map[string]*ClientRep = make(map[string]*ClientRep)
 var G_clients_lock *sync.Mutex = new(sync.Mutex)
+
 // Map topic => sub
 // sub is implemented as map, key is client_id, value is qos
 var G_subs map[string]map[string]uint8 = make(map[string]map[string]uint8)
 var G_subs_lock *sync.Mutex = new(sync.Mutex)
 var G_redis_client *RedisClient = StartRedisClient()
 
-var bolt_db *DB = new(bolt.DB)
-
+var Bolt_db *BoltDB = new(BoltDB)
 
 // This function should be called upon starting up. It will
 // try to recover global status(G_subs, etc) from Redis.
@@ -27,13 +26,13 @@ func RecoverFromRedis() {
 	// Reconstruct the subscription map from redis records
 	client_id_keys := G_redis_client.GetSubsClients()
 	log.Info("Recovering subscription info from Redis")
-	for _, client_id_key := range(client_id_keys) {
+	for _, client_id_key := range client_id_keys {
 		sub_map := make(map[string]uint8)
 		G_redis_client.Fetch(client_id_key, &sub_map)
 		var client_id string
 		fmt.Sscanf(client_id_key, "gossipd.client-subs.%s", &client_id)
 
-		for topic, qos := range(sub_map) {
+		for topic, qos := range sub_map {
 			// lock won't be needed since this is at the startup phase
 			subs := G_subs[topic]
 			if subs == nil {
@@ -47,7 +46,32 @@ func RecoverFromRedis() {
 	}
 }
 
-func (mqtt *Mqtt)Show() {
+func RecoverFromBolt() {
+	// Reconstruct the subscription map from bolt database
+	client_id_keys := Bolt_db.GetSubsClients()
+
+	log.Info("Recovering subscription info from BoltDb")
+	for _, client_id_key := range client_id_keys {
+		sub_map := make(map[string]uint8)
+		Bolt_db.Fetch(client_id_key, &sub_map)
+		var client_id string
+		fmt.Sscanf(client_id_key, "gossipd.client-subs.%s", &client_id)
+
+		for topic, qos := range sub_map {
+			// lock won't be needed since this is at the startup phase
+			subs := G_subs[topic]
+			if subs == nil {
+				log.Debug("current subscription is the first client to topic:", topic)
+				subs = make(map[string]uint8)
+				G_subs[topic] = subs
+			}
+			subs[client_id] = qos
+		}
+		log.Debugf("client(%s) subscription info recovered", client_id)
+	}
+}
+
+func (mqtt *Mqtt) Show() {
 	if mqtt.FixedHeader != nil {
 		mqtt.FixedHeader.Show()
 	} else {
@@ -60,7 +84,7 @@ func (mqtt *Mqtt)Show() {
 		log.Debug("ConnectFlags is nil")
 	}
 
-    fmt.Println("ProtocolName:", mqtt.ProtocolName)
+	fmt.Println("ProtocolName:", mqtt.ProtocolName)
 	fmt.Println("Version:", mqtt.ProtocolVersion)
 	fmt.Println("TopicName:", mqtt.TopicName)
 	fmt.Println("ClientId:", mqtt.ClientId)
@@ -79,7 +103,7 @@ func (mqtt *Mqtt)Show() {
 	fmt.Println("ReturnCode:", mqtt.ReturnCode)
 }
 
-func (header *FixedHeader)Show() {
+func (header *FixedHeader) Show() {
 	fmt.Println("header detail:")
 	fmt.Println("message type: ", MessageTypeStr(header.MessageType))
 	fmt.Println("DupFlag: ", header.DupFlag)
@@ -89,9 +113,9 @@ func (header *FixedHeader)Show() {
 	fmt.Println("\n=====================\n")
 }
 
-func (flags *ConnectFlags)Show() {
+func (flags *ConnectFlags) Show() {
 	fmt.Println("connect flags detail:")
-    fmt.Println("UsernameFlag:", flags.UsernameFlag)
+	fmt.Println("UsernameFlag:", flags.UsernameFlag)
 	fmt.Println("PasswordFlag:", flags.PasswordFlag)
 	fmt.Println("WillRetain:", flags.WillRetain)
 	fmt.Println("WillFlag:", flags.WillFlag)
@@ -108,16 +132,16 @@ func ReadFixedHeader(conn *net.Conn) *FixedHeader {
 		return nil
 	}
 
-    byte1 := buf[0]
-    header := new(FixedHeader)
-    header.MessageType = uint8(byte1 & 0xF0 >> 4)
-    header.DupFlag = byte1 & 0x08 > 0
-    header.QosLevel = uint8(byte1 & 0x06 >> 1)
-    header.Retain = byte1 & 0x01 > 0
+	byte1 := buf[0]
+	header := new(FixedHeader)
+	header.MessageType = uint8(byte1 & 0xF0 >> 4)
+	header.DupFlag = byte1&0x08 > 0
+	header.QosLevel = uint8(byte1 & 0x06 >> 1)
+	header.Retain = byte1&0x01 > 0
 
 	byte2 := buf[1]
-    header.Length = decodeVarLength(byte2, conn)
-    return header
+	header.Length = decodeVarLength(byte2, conn)
+	return header
 }
 
 func ReadCompleteCommand(conn *net.Conn) (*FixedHeader, []byte) {
@@ -152,10 +176,10 @@ func parseConnectInfo(buf []byte) *ConnectInfo {
 	info.CleanSession = (flagByte & 0x02) > 0
 	buf = buf[1:]
 	info.Keepalive, _ = parseUint16(buf)
-    return info
+	return info
 }
 
-func (con_info *ConnectInfo)Show() {
+func (con_info *ConnectInfo) Show() {
 	fmt.Println("connect info detail:")
 	fmt.Println("Protocol:", con_info.Protocol)
 	fmt.Println("Version:", con_info.Version)
@@ -176,8 +200,8 @@ func decodeVarLength(cur byte, conn *net.Conn) uint32 {
 	multi := uint32(1)
 
 	for {
-		length += multi * uint32(cur & 0x7f)
-		if cur & 0x80 == 0 {
+		length += multi * uint32(cur&0x7f)
+		if cur&0x80 == 0 {
 			break
 		}
 		buf := make([]byte, 1)
@@ -188,12 +212,12 @@ func decodeVarLength(cur byte, conn *net.Conn) uint32 {
 		cur = buf[0]
 		multi *= 128
 	}
-	
+
 	return length
 }
 
 func parseUint16(buf []byte) (uint16, []byte) {
-	return uint16(buf[0] << 8) + uint16(buf[1]), buf[2:]
+	return uint16(buf[0]<<8) + uint16(buf[1]), buf[2:]
 }
 
 func parseUint8(buf []byte) (uint8, []byte) {
@@ -202,12 +226,12 @@ func parseUint8(buf []byte) (uint8, []byte) {
 
 func parseUTF8(buf []byte) (string, []byte) {
 	length, buf := parseUint16(buf)
-	str := buf [: length]
+	str := buf[:length]
 	return string(str), buf[length:]
 }
 
 func MessageTypeStr(mt uint8) string {
-	var strArray = []string {
+	var strArray = []string{
 		"reserved",
 		"CONNECT",
 		"CONNACK",
@@ -230,68 +254,65 @@ func MessageTypeStr(mt uint8) string {
 }
 
 // Types
-const(
-    CONNECT = uint8(iota + 1)
-    CONNACK
-    PUBLISH
-    PUBACK
-    PUBREC
-    PUBREL
-    PUBCOMP
-    SUBSCRIBE
-    SUBACK
-    UNSUBSCRIBE
-    UNSUBACK
-    PINGREQ
-    PINGRESP
-    DISCONNECT
+const (
+	CONNECT = uint8(iota + 1)
+	CONNACK
+	PUBLISH
+	PUBACK
+	PUBREC
+	PUBREL
+	PUBCOMP
+	SUBSCRIBE
+	SUBACK
+	UNSUBSCRIBE
+	UNSUBACK
+	PINGREQ
+	PINGRESP
+	DISCONNECT
 )
 
-const(
-    ACCEPTED = uint8(iota)
-    UNACCEPTABLE_PROTOCOL_VERSION
-    IDENTIFIER_REJECTED
-    SERVER_UNAVAILABLE
-    BAD_USERNAME_OR_PASSWORD
-    NOT_AUTHORIZED
+const (
+	ACCEPTED = uint8(iota)
+	UNACCEPTABLE_PROTOCOL_VERSION
+	IDENTIFIER_REJECTED
+	SERVER_UNAVAILABLE
+	BAD_USERNAME_OR_PASSWORD
+	NOT_AUTHORIZED
 )
 
-type Mqtt struct{
-    FixedHeader *FixedHeader
-    ProtocolName, TopicName, ClientId, WillTopic, WillMessage, Username, Password string
-    ProtocolVersion uint8
-    ConnectFlags *ConnectFlags
-    KeepAliveTimer, MessageId uint16
-    Data []byte
-    Topics []string
-    Topics_qos []uint8
-    ReturnCode uint8
+type Mqtt struct {
+	FixedHeader                                                                   *FixedHeader
+	ProtocolName, TopicName, ClientId, WillTopic, WillMessage, Username, Password string
+	ProtocolVersion                                                               uint8
+	ConnectFlags                                                                  *ConnectFlags
+	KeepAliveTimer, MessageId                                                     uint16
+	Data                                                                          []byte
+	Topics                                                                        []string
+	Topics_qos                                                                    []uint8
+	ReturnCode                                                                    uint8
 }
 
-type ConnectFlags struct{
-    UsernameFlag, PasswordFlag, WillRetain, WillFlag, CleanSession bool
-    WillQos uint8
+type ConnectFlags struct {
+	UsernameFlag, PasswordFlag, WillRetain, WillFlag, CleanSession bool
+	WillQos                                                        uint8
 }
 
 type ConnectInfo struct {
-    Protocol string // Must be 'MQIsdp' for now
-    Version uint8
-    UsernameFlag bool
-    PasswordFlag bool
-    WillRetain bool
-    WillQos uint8
-    WillFlag bool
-    CleanSession bool
-    Keepalive uint16
+	Protocol     string // Must be 'MQIsdp' for now
+	Version      uint8
+	UsernameFlag bool
+	PasswordFlag bool
+	WillRetain   bool
+	WillQos      uint8
+	WillFlag     bool
+	CleanSession bool
+	Keepalive    uint16
 }
 
 type FixedHeader struct {
-    MessageType uint8
-    DupFlag bool
-	Retain bool
-    QosLevel uint8
-    Length uint32
+	MessageType uint8
+	DupFlag     bool
+	Retain      bool
+	QosLevel    uint8
+	Length      uint32
 }
-
-
-
