@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	log "github.com/cihub/seelog"
-	"github.com/luanjunyi/gossipd/mqtt"
+	"github.com/rustyoz/gossipd/mqtt"
 	"net"
 	"os"
 	"runtime/debug"
