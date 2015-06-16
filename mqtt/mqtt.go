@@ -2,6 +2,7 @@ package mqtt
 
 import (
 	"fmt"
+	"github.com/boltdb/bolt"
 	log "github.com/cihub/seelog"
 	"io"
 	"net"
@@ -19,7 +20,26 @@ var G_subs_lock *sync.Mutex = new(sync.Mutex)
 
 var Bolt_db *BoltDB = new(BoltDB)
 
+func (b *BoltDB) OpenDatabase(file *string) {
+	f := *file
+	db, err := bolt.Open(f, 0644, nil)
+	if err != nil {
+		panic(fmt.Sprintf("opening bolt database failed:(%s)", err))
+	}
+
+	db.Update(func(tx *bolt.Tx) error {
+		_, err := tx.CreateBucketIfNotExists([]byte(world))
+		if err != nil {
+			return fmt.Errorf("create bucket: %s", err)
+		}
+		return nil
+	})
+
+	b.DB = db
+}
+
 func RecoverFromBolt() {
+
 	// Reconstruct the subscription map from bolt database
 	client_id_keys := Bolt_db.GetSubsClients()
 

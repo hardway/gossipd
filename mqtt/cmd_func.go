@@ -16,7 +16,7 @@ const (
 
 // Handle CONNECT
 func HandleConnect(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
-	//mqtt.Show()
+	mqtt.Show()
 	client_id := mqtt.ClientId
 
 	log.Debugf("Hanling CONNECT, client id:(%s)", client_id)
@@ -27,7 +27,7 @@ func HandleConnect(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 		return
 	}
 
-	if mqtt.ProtocolName != "MQIsdp" || mqtt.ProtocolVersion != 3 {
+	if mqtt.ProtocolName != "MQTT" || mqtt.ProtocolVersion != 4 {
 		log.Debugf("ProtocolName(%s) and/or version(%d) not supported, will send UNACCEPTABLE_PROTOCOL_VERSION",
 			mqtt.ProtocolName, mqtt.ProtocolVersion)
 		SendConnack(UNACCEPTABLE_PROTOCOL_VERSION, conn, nil)

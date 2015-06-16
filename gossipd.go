@@ -17,7 +17,8 @@ var g_port = flag.Int("p", 1883, "port of the broker to listen")
 var g_redis_port = flag.Int("r", 6379, "port of the broker to listen")
 
 var g_bolt_file = flag.String("b", "bolt.db", "database file")
-var g_bolt_db = new(mqtt.BoltDB)
+
+var g_bolt_db *mqtt.BoltDB = new(mqtt.BoltDB)
 
 var g_cmd_route = map[uint8]CmdFunc{
 	mqtt.CONNECT:     mqtt.HandleConnect,
@@ -108,7 +109,9 @@ func main() {
 	flag.Parse()
 
 	setup_logging()
-	mqtt.OpenDatabase(*g_bolt_file)
+
+	g_bolt_db.OpenDatabase(g_bolt_file)
+	mqtt.Bolt_db = g_bolt_db
 	mqtt.RecoverFromBolt()
 	log.Debugf("Gossipd kicking off, listening localhost:%d", *g_port)
 

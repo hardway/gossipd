@@ -11,19 +11,10 @@ import (
 )
 
 type BoltDB struct {
-	bolt.DB
+	*bolt.DB
 }
 
 var world = []byte("mqtt")
-
-func OpenDatabase(file string) {
-	db, err := bolt.Open(file, 0644, nil)
-	if err != nil {
-		panic(fmt.Sprintf("opening bolt database failed:(%s)", err))
-	}
-
-	Bolt_db.DB = *db
-}
 
 func (db *BoltDB) Store(key string, value interface{}) {
 	var buf bytes.Buffer
@@ -59,6 +50,9 @@ func (db *BoltDB) Fetch(key string, value interface{}) int {
 		}
 
 		val = bucket.Get([]byte(key))
+		if val == nil {
+			return fmt.Errorf("Key not found: %q", key)
+		}
 		return nil
 	})
 	if err != nil {
