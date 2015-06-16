@@ -11,20 +11,18 @@ import (
 )
 
 type BoltDB struct {
-	*bolt.DB
+	bolt.DB
 }
 
 var world = []byte("mqtt")
 
-func OpenDatabase(file string) *BoltDB {
+func OpenDatabase(file string) {
 	db, err := bolt.Open(file, 0644, nil)
 	if err != nil {
 		panic(fmt.Sprintf("opening bolt database failed:(%s)", err))
 	}
 
-	boltdb := new(BoltDB)
-	boltdb.DB = db
-	return boltdb
+	Bolt_db.DB = *db
 }
 
 func (db *BoltDB) Store(key string, value interface{}) {

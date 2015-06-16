@@ -17,6 +17,7 @@ var g_port = flag.Int("p", 1883, "port of the broker to listen")
 var g_redis_port = flag.Int("r", 6379, "port of the broker to listen")
 
 var g_bolt_file = flag.String("b", "bolt.db", "database file")
+var g_bolt_db = new(mqtt.BoltDB)
 
 var g_cmd_route = map[uint8]CmdFunc{
 	mqtt.CONNECT:     mqtt.HandleConnect,
