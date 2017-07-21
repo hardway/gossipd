@@ -27,7 +27,11 @@ func HandleConnect(mqtt *Mqtt, conn *net.Conn, client **ClientRep) {
 		return
 	}
 
-	if mqtt.ProtocolName != "MQIsdp" || mqtt.ProtocolVersion != 3 {
+	supported_protocols:=map[string] bool{"MQIsdp/3":true, "MQTT/4":true}
+
+	protocol_check:=fmt.Sprintf("%s/%s", mqtt.ProtocolName, mqtt.ProtocolVersion);
+
+	if support, exists:=supported_protocols[protocol_check]; support && exists {
 		log.Debugf("ProtocolName(%s) and/or version(%d) not supported, will send UNACCEPTABLE_PROTOCOL_VERSION",
 			mqtt.ProtocolName, mqtt.ProtocolVersion)
 		SendConnack(UNACCEPTABLE_PROTOCOL_VERSION, conn, nil)
