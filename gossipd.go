@@ -4,7 +4,7 @@ import (
 	"flag"
 	"fmt"
 	log "github.com/cihub/seelog"
-	"github.com/rustyoz/gossipd/mqtt"
+	"./mqtt"
 	"net"
 	"os"
 	"runtime/debug"
@@ -14,10 +14,8 @@ type CmdFunc func(mqtt *mqtt.Mqtt, conn *net.Conn, client **mqtt.ClientRep)
 
 var g_debug = flag.Bool("d", false, "enable debugging log")
 var g_port = flag.Int("p", 1883, "port of the broker to listen")
-var g_redis_port = flag.Int("r", 6379, "port of the broker to listen")
 
 var g_bolt_file = flag.String("b", "bolt.db", "database file")
-
 var g_bolt_db *mqtt.BoltDB = new(mqtt.BoltDB)
 
 var g_cmd_route = map[uint8]CmdFunc{
